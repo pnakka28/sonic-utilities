@@ -449,7 +449,6 @@ def mpls(ctx, interfacename, namespace, display):
 interfaces.add_command(portchannel.portchannel)
 
 
-
 @interfaces.command()
 @click.argument('interfacename', required=False)
 @multi_asic_util.multi_asic_click_options
@@ -493,10 +492,8 @@ def flap(ctx, interfacename, namespace, display):
             # Skip internal ports based on display option
             if masic.skip_display(constants.PORT_OBJ, port):
                 continue
-            
             if interfacename and port == interfacename:
                 intf_found = True
-        
             port_data = appl_db.get_all(appl_db.APPL_DB, f'PORT_TABLE:{port}') or {}
 
             flap_count = port_data.get('flap_count', 'Never')
