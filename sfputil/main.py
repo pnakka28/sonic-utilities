@@ -1543,7 +1543,7 @@ def download_firmware(port_name, filepath):
     try:
         fwinfo = api.get_module_fw_mgmt_feature()
         if fwinfo['status'] == True:
-            startLPLsize, maxblocksize, lplonly_flag, autopaging_flag, writelength = fwinfo['feature']
+            startLPLsize, maxblocksize, lplonly_flag, _, _ = fwinfo['feature']
         else:
             click.echo("Failed to fetch CDB Firmware management features")
             sys.exit(EXIT_FAIL)
@@ -1552,11 +1552,11 @@ def download_firmware(port_name, filepath):
         sys.exit(ERROR_NOT_IMPLEMENTED)
 
     click.echo('CDB: Starting firmware download')
-    startdata = fd.read(startLPLsize)
-    status = api.cdb_start_firmware_download(startLPLsize, startdata, file_size)
+    status = api.cdb_start_firmware_download(filepath)
     if status != 1:
         click.echo('CDB: Start firmware download failed - status {}'.format(status))
         sys.exit(EXIT_FAIL)
+    fd.seek(startLPLsize)
 
     # Increase the optoe driver's write max to speed up firmware download
     try:
@@ -1581,7 +1581,7 @@ def download_firmware(port_name, filepath):
             if lplonly_flag:
                 status = api.cdb_lpl_block_write(address, data)
             else:
-                status = api.cdb_epl_block_write(address, data, autopaging_flag, writelength)
+                status = api.cdb_epl_block_write(address, data)
             if (status != 1):
                 click.echo("CDB: firmware download failed! - status {}".format(status))
                 sys.exit(EXIT_FAIL)
