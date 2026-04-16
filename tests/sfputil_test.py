@@ -1303,9 +1303,34 @@ EEPROM hexdump for port Ethernet4
         mock_sfp.set_optoe_write_max = MagicMock(side_effect=NotImplementedError)
         status = sfputil.download_firmware("Ethernet0", "test.bin")
         assert status == 1
+        mock_api.cdb_start_firmware_download.assert_called_once_with("test.bin")
+
+        mock_api.cdb_start_firmware_download.reset_mock()
         mock_api.get_module_fw_mgmt_feature.return_value = {'status': True, 'feature': (0, 64, True, False, 0)}
         status = sfputil.download_firmware("Ethernet0", "test.bin")
         assert status == 1
+        mock_api.cdb_start_firmware_download.assert_called_once_with("test.bin")
+        mock_api.reset_mock()
+        block_a = b'\xaa' * 64
+        block_b = b'\xbb' * 64
+        mock_file.return_value.tell.return_value = 128
+        mock_file.return_value.read.side_effect = [block_a, block_b]
+        mock_api.get_module_fw_mgmt_feature.return_value = {
+            'status': True, 'feature': (0, 64, False, False, 0)
+        }
+        mock_api.cdb_start_firmware_download.return_value = 1
+        mock_api.cdb_epl_block_write.return_value = 1
+        mock_api.cdb_firmware_download_complete.return_value = 1
+        status = sfputil.download_firmware("Ethernet0", "test_fw.bin")
+        assert status == 1
+        mock_api.cdb_start_firmware_download.assert_called_once_with("test_fw.bin")
+        assert mock_api.cdb_epl_block_write.call_count == 2
+        for call in mock_api.cdb_epl_block_write.call_args_list:
+            args, kwargs = call
+            assert len(args) == 2
+            assert kwargs == {}
+        mock_api.cdb_epl_block_write.assert_any_call(0, block_a)
+        mock_api.cdb_epl_block_write.assert_any_call(64, block_b)
 
     @patch('sfputil.main.platform_chassis')
     @patch('sfputil.main.logical_port_to_physical_port_index', MagicMock(return_value=1))
