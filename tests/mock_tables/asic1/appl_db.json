@@ -139,5 +139,23 @@
     "INTF_TABLE:Eth64.30": {
         "admin_status": "up",
         "vlan": "30"
+    },
+    "_GEARBOX_TABLE:phy:1": {
+        "name": "agera3-1",
+        "phy_id": "1",
+        "phy_oid": "0x21000000000003",
+        "firmware_major_version": "v1.1"
+    },
+    "_GEARBOX_TABLE:interface:256": {
+        "name": "Ethernet-BP256",
+        "index": "256",
+        "line_lanes": "300,301,302,303",
+        "phy_id": "1",
+        "system_lanes": "400,401,402,403"
+    },
+    "_GEARBOX_TABLE:phy:1:ports:256": {
+        "index": "256",
+        "line_speed": "40000",
+        "system_speed": "40000"
     }
 }

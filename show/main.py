@@ -260,21 +260,30 @@ def connect_config_db():
 
 def is_gearbox_configured():
     """
-    Checks whether Gearbox is configured or not
+    Checks whether Gearbox is configured or not in any ASIC namespace
     """
-    app_db = SonicV2Connector()
     try:
-        app_db.connect(app_db.APPL_DB)
-
-        keys = app_db.keys(app_db.APPL_DB, '*')
-
-        # If any _GEARBOX_TABLE:phy:* records present in APPL_DB, then the gearbox is configured
-        if any(re.match(GEARBOX_TABLE_PHY_PATTERN, key) for key in keys):
-            return True
-        else:
-            return False
+        load_db_config()
+        namespaces = multi_asic.get_namespace_list()
+        if multi_asic.is_multi_asic():
+            # Gearbox PHYs are never attached to fabric ASICs
+            fabric_namespaces = multi_asic.get_all_namespaces()['fabric_ns']
+            namespaces = [ns for ns in namespaces if ns not in fabric_namespaces]
     except RuntimeError:
         return False
+
+    for namespace in namespaces:
+        try:
+            app_db = SonicV2Connector(namespace=namespace)
+            app_db.connect(app_db.APPL_DB)
+
+            # If any _GEARBOX_TABLE:phy:* records present in APPL_DB, then the gearbox is configured
+            if app_db.keys(app_db.APPL_DB, GEARBOX_TABLE_PHY_PATTERN):
+                return True
+        except RuntimeError:
+            # An unreachable namespace must not hide the gearbox of the others
+            continue
+    return False
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help', '-?'])
 

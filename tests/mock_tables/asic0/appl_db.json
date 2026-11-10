@@ -194,5 +194,23 @@
         "ctlos_spacing_bytes": "2048",
         "init_action": "best_effort",
         "flush_action": "best_effort"
+    },
+    "_GEARBOX_TABLE:phy:1": {
+        "name": "agera3-0",
+        "phy_id": "1",
+        "phy_oid": "0x21000000000002",
+        "firmware_major_version": "v1.0"
+    },
+    "_GEARBOX_TABLE:interface:0": {
+        "name": "Ethernet0",
+        "index": "0",
+        "line_lanes": "200,201,202,203",
+        "phy_id": "1",
+        "system_lanes": "100,101,102,103"
+    },
+    "_GEARBOX_TABLE:phy:1:ports:0": {
+        "index": "0",
+        "line_speed": "40000",
+        "system_speed": "40000"
     }
 }

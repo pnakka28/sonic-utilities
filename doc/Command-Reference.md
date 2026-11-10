@@ -5934,13 +5934,15 @@ This section explains all the Gearbox PHY show commands that are supported in SO
 ### Gearbox show commands
 This sub-section contains the show commands that are supported for gearbox phy.
 
+On multi-ASIC platforms, these commands display the gearbox PHYs of all ASIC namespaces in a single table with an additional "ASIC" column (PHY Ids are only unique within an ASIC).
+
 **show gearbox interfaces status**
 
 This command displays information about the gearbox phy interface lanes, speeds and status. Data is displayed for both MAC side and line side of the gearbox phy
 
 - Usage:
   ```
-  show gearbox interfaces status
+  show gearbox interfaces status [-n|--namespace <namespace>]
   ```
 
 - Example:
@@ -5961,7 +5963,7 @@ This command displays basic information about the gearbox phys configured on the
 
 - Usage:
   ```
-  show gearbox phys status
+  show gearbox phys status [-n|--namespace <namespace>]
   ```
 
 - Example:
@@ -5974,13 +5976,24 @@ This command displays basic information about the gearbox phys configured on the
 
   ```
 
+- Example (multi-ASIC):
+
+  ```
+  /home/admin# show gearbox phys status
+  ASIC      PHY Id      Name    Firmware
+  ------  --------  --------  ----------
+  asic0          1  agera3-0        v1.0
+  asic1          1  agera3-1        v1.1
+
+  ```
+
 **show gearbox interfaces fec-stats**
 
 This command displays FEC statistics for gearbox interfaces from the GB_COUNTERS_DB. Statistics are shown separately for each port's system side and line side. An optional port name argument filters output to a single port.
 
 - Usage:
   ```
-  show gearbox interfaces fec-stats [<port_name>]
+  show gearbox interfaces fec-stats [<port_name>] [-n|--namespace <namespace>]
   ```
 
 - Example (all ports):
@@ -6009,14 +6022,27 @@ This command displays FEC statistics for gearbox interfaces from the GB_COUNTERS
 
   STATE legend: U = Up, D = Down, N/A = Unknown
 
+- Example (multi-ASIC, single namespace):
+
+  ```
+  /home/admin# show gearbox interfaces fec-stats -n asic1
+  ASIC    GB IFACE                STATE    FEC_CORR    FEC_UNCORR    FEC_SYMBOL_ERR    FEC_PRE_BER    FEC_POST_BER    FEC_PRE_BER_MAX    FEC_MAX_T
+  ------  --------------------  -------  ----------  ------------  ----------------  -------------  --------------  -----------------  -----------
+  asic1   Ethernet-BP256 Line         U       4,000             1                20       2.50e-08        0.00e+00           3.00e-08            5
+  asic1   Ethernet-BP256 System       U       3,000             0                10       1.50e-09        0.00e+00           2.00e-09            3
+
+  ```
+
 **show gearbox interfaces fec-histogram**
 
 This command displays the FEC codeword error histogram for gearbox interfaces. Histogram bins (BIN0–BIN15) count codewords with a given number of symbol errors. An optional port name argument filters output to a single port.
 
 - Usage:
   ```
-  show gearbox interfaces fec-histogram [<port_name>]
+  show gearbox interfaces fec-histogram [<port_name>] [-n|--namespace <namespace>]
   ```
+
+  On multi-ASIC platforms, the ASIC namespace is shown after each port, e.g. "Ethernet-BP256 Line (asic1)".
 
 - Example (single port):
 
