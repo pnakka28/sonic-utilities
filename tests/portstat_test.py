@@ -968,6 +968,77 @@ class TestPortStat(object):
         assert return_code == 0
         assert result == intf_fec_counters_nonzero
 
+    def test_show_intf_fec_counters_asic_only(self):
+        remove_tmp_cnstat_file()
+        runner = CliRunner()
+        result = runner.invoke(
+            show.cli.commands["interfaces"].commands["counters"].commands["fec-stats"], ["--asiconly"])
+        print(result.exit_code)
+        print(result.output)
+        assert result.exit_code == 0
+        assert result.output == intf_fec_counters
+
+        result = runner.invoke(
+            show.cli.commands["interfaces"].commands["counters"].commands["fec-stats"],
+            ["--asiconly", "--verbose"])
+        assert result.exit_code == 0
+        assert result.output.splitlines()[0].endswith("--asiconly")
+
+        return_code, result = get_result_and_return_code(['portstat', '-f', '--asiconly'])
+        print("return_code: {}".format(return_code))
+        print("result = {}".format(result))
+        assert return_code == 0
+        assert result == intf_fec_counters
+
+        # Short form
+        result = runner.invoke(
+            show.cli.commands["interfaces"].commands["counters"].commands["fec-stats"], ["-ao"])
+        assert result.exit_code == 0
+        assert result.output == intf_fec_counters
+
+        return_code, result = get_result_and_return_code(['portstat', '-f', '-ao'])
+        assert return_code == 0
+        assert result == intf_fec_counters
+
+    def test_portstat_asic_only_requires_fec_stats(self):
+        return_code, result = get_result_and_return_code(['portstat', '--asiconly'])
+        print("return_code: {}".format(return_code))
+        print("result = {}".format(result))
+        assert return_code == 2
+        assert "--asiconly is only supported with -f/--fec-stats" in result
+
+    def test_show_intf_fec_counters_asic_only_after_clear(self):
+        remove_tmp_cnstat_file()
+        try:
+            return_code, result = get_result_and_return_code(['portstat', '-c'])
+            assert return_code == 0
+            assert result.rstrip() == clear_counter
+
+            # The mock GB_COUNTERS_DB has gearbox ports, so an ASIC-only snapshot is saved too
+            cnstat_dir = UserCache("portstat").get_directory()
+            cnstat_file = os.path.join(cnstat_dir, "portstat")
+            cnstat_asic_file = os.path.join(cnstat_dir, "portstat_asic")
+            assert os.path.isfile(cnstat_asic_file)
+
+            for fname, cached_time in ((cnstat_file, "2026-01-01T00:00:00"),
+                                       (cnstat_asic_file, "2026-01-02T00:00:00")):
+                with open(fname) as f:
+                    cnstat = json.load(f)
+                cnstat["time"] = cached_time
+                with open(fname, "w") as f:
+                    json.dump(cnstat, f)
+
+            # Each view diffs against its own snapshot
+            return_code, result = get_result_and_return_code(['portstat', '-f', '--asiconly'])
+            assert return_code == 0
+            assert result.splitlines()[0] == "Last cached time was 2026-01-02T00:00:00"
+
+            return_code, result = get_result_and_return_code(['portstat', '-f'])
+            assert return_code == 0
+            assert result.splitlines()[0] == "Last cached time was 2026-01-01T00:00:00"
+        finally:
+            remove_tmp_cnstat_file()
+
     def test_show_intf_rates_nonzero(self):
         remove_tmp_cnstat_file()
         return_code, result = get_result_and_return_code(['portstat', '-R', '-nz'])
@@ -1369,3 +1440,71 @@ class TestPortstatGetDbClient(object):
             assert result_asic1 == mock_db_client_asic1
             assert portstat.db_clients['asic0'] == mock_db_client_asic0
             assert portstat.db_clients['asic1'] == mock_db_client_asic1
+
+
+class TestPortstatAsicOnly(object):
+    """Test ASIC-only counter selection for ports with an external gearbox PHY"""
+
+    @pytest.mark.parametrize("asic_only", [False, True])
+    def test_get_cnstat_port_counter_usage(self, asic_only):
+        from unittest import mock
+        from utilities_common.portstat import Portstat
+
+        with mock.patch('utilities_common.portstat.CounterTable') as mock_counter_table:
+            mock_counter_table.return_value.get.return_value = (True, ())
+            portstat = Portstat(namespace=None, display_option='all', asic_only=asic_only)
+            portstat.get_cnstat_dict()
+
+        # The default view goes through PortCounter (ASIC and gearbox PHY counters summed),
+        # the ASIC-only view reads the port's own COUNTERS_DB entry
+        assert mock_counter_table.return_value.get.called != asic_only
+
+    def test_get_cnstat_asic_only_reads_counters_db(self):
+        from utilities_common.portstat import Portstat
+
+        default_cnstat, _ = Portstat(namespace=None, display_option='all').get_cnstat_dict()
+        asic_cnstat, _ = Portstat(namespace=None, display_option='all', asic_only=True).get_cnstat_dict()
+        default_cnstat.pop('time')
+        asic_cnstat.pop('time')
+
+        # The mock CounterTable reads COUNTERS_DB without summing gearbox counters,
+        # so both views must be identical
+        assert asic_cnstat
+        assert asic_cnstat == default_cnstat
+
+    def test_has_gearbox_ports(self):
+        from utilities_common.portstat import Portstat
+
+        portstat = Portstat(namespace=None, display_option='all')
+        assert portstat.has_gearbox_ports()
+
+    def test_has_gearbox_ports_no_gearbox_port_map(self):
+        from unittest import mock
+        from utilities_common.portstat import Portstat
+
+        portstat = Portstat(namespace=None, display_option='all')
+        db = mock.MagicMock()
+        db.get_db_list.return_value = ['COUNTERS_DB', 'GB_COUNTERS_DB']
+        db.get_all.return_value = {}
+        with mock.patch.object(portstat, 'get_db_client', return_value=db):
+            assert not portstat.has_gearbox_ports()
+        db.get_all.assert_called_with('GB_COUNTERS_DB', 'COUNTERS_PORT_NAME_MAP')
+
+    def test_has_gearbox_ports_no_gearbox_db(self):
+        from unittest import mock
+        from utilities_common.portstat import Portstat
+
+        portstat = Portstat(namespace=None, display_option='all')
+        db = mock.MagicMock()
+        db.get_db_list.return_value = ['COUNTERS_DB']
+        with mock.patch.object(portstat, 'get_db_client', return_value=db):
+            assert not portstat.has_gearbox_ports()
+        db.get_all.assert_not_called()
+
+    def test_has_gearbox_ports_on_supervisor(self):
+        from unittest import mock
+        from utilities_common.portstat import Portstat
+
+        portstat = Portstat(namespace=None, display_option='all')
+        with mock.patch('utilities_common.portstat.device_info.is_supervisor', return_value=True):
+            assert not portstat.has_gearbox_ports()

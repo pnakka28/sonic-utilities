@@ -143,6 +143,7 @@ RATES_TABLE_PREFIX = "RATES:"
 
 COUNTER_TABLE_PREFIX = "COUNTERS:"
 COUNTERS_PORT_NAME_MAP = "COUNTERS_PORT_NAME_MAP"
+GB_COUNTERS_DB = "GB_COUNTERS_DB"
 
 PORT_STATUS_TABLE_PREFIX = "PORT_TABLE:"
 PORT_STATE_TABLE_PREFIX = "PORT_TABLE|"
@@ -184,10 +185,11 @@ def is_non_zero(value):
 
 
 class Portstat(object):
-    def __init__(self, namespace, display_option):
+    def __init__(self, namespace, display_option, asic_only=False):
         self.db = None
         self.namespace = namespace
         self.display_option = display_option
+        self.asic_only = asic_only
         self.multi_asic = multi_asic_util.MultiAsic(display_option, namespace)
         if device_info.is_supervisor():
             self.db = SonicV2Connector(use_unix_socket_path=False)
@@ -345,8 +347,11 @@ class Portstat(object):
             """
             fields = ["0"] * len(counter_bucket_dict)
 
-            _, fvs = counter_table.get(PortCounter(), port)
-            fvs = dict(fvs)
+            if self.asic_only:
+                fvs = self.db.get_all(self.db.COUNTERS_DB, COUNTER_TABLE_PREFIX + counter_port_name_map[port]) or {}
+            else:
+                _, fvs = counter_table.get(PortCounter(), port)
+                fvs = dict(fvs)
             for pos, cntr_list in counter_bucket_dict.items():
                 for counter_name in cntr_list:
                     if counter_name not in fvs:
@@ -410,6 +415,20 @@ class Portstat(object):
         if not self.db_clients.get(ns):
             self.db_clients[ns] = multi_asic.connect_to_all_dbs_for_ns(ns)
         return self.db_clients[ns]
+
+    def has_gearbox_ports(self):
+        """
+            Check whether any port in the namespaces has a PHY part
+        """
+        if device_info.is_supervisor():
+            return False
+        for ns in self.multi_asic.get_ns_list_based_on_options():
+            db = self.get_db_client(ns)
+            if GB_COUNTERS_DB not in db.get_db_list():
+                continue
+            if db.get_all(GB_COUNTERS_DB, COUNTERS_PORT_NAME_MAP):
+                return True
+        return False
 
     def get_port_state(self, port_name):
         """

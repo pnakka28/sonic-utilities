@@ -860,7 +860,8 @@ def errors(namespace, display, period, json_fmt, verbose):  # noqa: F811
 @click.option('-j', '--json', 'json_fmt', is_flag=True, help="Print in JSON format")
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 @click.option('--nonzero', is_flag=True, help="Only display non zero counters")
-def fec_stats(namespace, display, period, json_fmt, verbose, nonzero):
+@click.option('-ao', '--asiconly', is_flag=True, help="Display ASIC counters, excluding external PHY counters")
+def fec_stats(namespace, display, period, json_fmt, verbose, nonzero, asiconly):
     """Show interface counters fec-stats"""
 
     cmd = ['portstat', '-f']
@@ -877,6 +878,9 @@ def fec_stats(namespace, display, period, json_fmt, verbose, nonzero):
 
     if nonzero:
         cmd += ['-nz']
+
+    if asiconly:
+        cmd += ['--asiconly']
 
     clicommon.run_command(cmd, display_cmd=verbose)
 

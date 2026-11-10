@@ -6640,7 +6640,7 @@ Optional argument "-p" specify a period (in seconds) with which to gather counte
   show interfaces counters rates
   show interfaces counters rif [-p|--period <period>] [-i <interface_name>]
   show interfaces counters fec-histogram [-i <interface_name>]
-  show interfaces counters fec-stats
+  show interfaces counters fec-stats [-ao|--asiconly]
   show interfaces counters detailed <interface_name>
   show interfaces counters trim [interface_name] [-p|--period <sec>] [-j|--json]
   ```
@@ -6857,6 +6857,15 @@ The "fec-stats" subcommand is used to disply the interface fec related statistic
   ```
 
   FEC_MAX_T - Is the maximum NON-ZERO FEC histogram BIN (starting from Bin0). -1 indicates the value is invalid (For eg during link down)
+
+On ports backed by an external gearbox PHY, the FEC_CORR, FEC_UNCORR and FEC_SYMBOL_ERR counters are the sum of the switch ASIC counters and the gearbox PHY system side and line side counters. Optional argument "-ao/--asiconly" displays the switch ASIC counters only. Its baseline after "sonic-clear counters" is saved separately, so the values are still relative to the last clear.
+
+- Example:
+  ```
+  admin@sonic:~$ show interfaces counters fec-stats --asiconly
+  ```
+
+  To display the gearbox PHY counters, use "show gearbox interfaces fec-stats".
 
 For debugging link related issues where you need to clear the FEC histogram and monitor the link again, use the following command
 
