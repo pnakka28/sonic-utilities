@@ -184,6 +184,19 @@ def counters():
     command = ["portstat", "-c"]
     run_command(command)
 
+
+@cli.group()
+def gearbox():
+    """Clear gearbox counters"""
+    pass
+
+
+@gearbox.command('counters')
+def gearbox_counters():
+    """Clear gearbox FEC counters"""
+    run_command(["gearboxutil", "interfaces", "clear"])
+
+
 @cli.command()
 @click.argument('interface', metavar='<interface_name>', required=False, type=str)
 def rifcounters(interface):

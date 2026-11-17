@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import sys
 from datetime import datetime
@@ -22,6 +23,7 @@ except KeyError:
     pass
 
 from swsscommon.swsscommon import SonicV2Connector
+from utilities_common.cli import UserCache
 
 
 # ========================== Common gearbox-utils logic ==========================
@@ -244,6 +246,116 @@ FEC_HISTOGRAM_BINS = [f"SAI_PORT_STAT_IF_IN_FEC_CODEWORD_ERRORS_S{i}" for i in r
 # FEC Histogram timestamp format
 FEC_HISTOGRAM_TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
+FEC_CORR_COUNTER = 'SAI_PORT_STAT_IF_IN_FEC_CORRECTABLE_FRAMES'
+FEC_UNCORR_COUNTER = 'SAI_PORT_STAT_IF_IN_FEC_NOT_CORRECTABLE_FRAMES'
+FEC_SYMBOL_ERR_COUNTER = 'SAI_PORT_STAT_IF_IN_FEC_SYMBOL_ERRORS'
+
+FEC_SNAPSHOT_COUNTERS = [FEC_CORR_COUNTER, FEC_UNCORR_COUNTER, FEC_SYMBOL_ERR_COUNTER] + FEC_HISTOGRAM_BINS
+
+FEC_RATE_RESET_FIELDS = ('FEC_PRE_BER_MAX',)
+
+GEARBOX_CACHE_APP = 'gearboxutil'
+FEC_SNAPSHOT_FILE = 'fec_counters'
+
+
+def get_fec_snapshot_path():
+    return os.path.join(UserCache(app_name=GEARBOX_CACHE_APP).get_directory(), FEC_SNAPSHOT_FILE)
+
+
+def load_fec_snapshot():
+    """
+    Return the snapshot saved by the last clear ({'time': ..., 'ports': {port: {counter: value}}}),
+    or None if there is none
+    """
+    path = get_fec_snapshot_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path) as f:
+            snapshot = json.load(f)
+    except (IOError, ValueError) as e:
+        print(f"Warning: ignoring unreadable gearbox counter snapshot {path}: {e}", file=sys.stderr)
+        return None
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get('ports'), dict):
+        return None
+    return snapshot
+
+
+def counter_diff(new, old):
+    """
+    Return new - old (clamped at 0, like portstat) as a string. A non-integer
+    new value is returned as is; a missing or non-integer old value counts as 0.
+    """
+    try:
+        new_value = int(new)
+    except (TypeError, ValueError):
+        return new
+    try:
+        old_value = int(old)
+    except (TypeError, ValueError):
+        old_value = 0
+    return str(max(0, new_value - old_value))
+
+
+def get_fec_max_t_since_snapshot(counters, old_counters, fallback):
+    """
+    Return the highest FEC histogram bin that counted codewords since the
+    snapshot, or -1 if none did.
+    """
+    max_t = -1
+    for i, bin_name in enumerate(FEC_HISTOGRAM_BINS):
+        try:
+            new_value = int(counters[bin_name])
+        except (KeyError, TypeError, ValueError):
+            return fallback
+        try:
+            old_value = int(old_counters.get(bin_name, 0))
+        except (TypeError, ValueError):
+            old_value = 0
+        if new_value - old_value > 0:
+            max_t = i
+    return str(max_t)
+
+
+def clear_fec_counters():
+    """
+    Save the gearbox FEC counters of every port to the per-user snapshot and
+    reset the FEC running maximums in GB_COUNTERS_DB
+    """
+    gb_db = SonicV2Connector(use_unix_socket_path=False)
+    gb_db.connect("GB_COUNTERS_DB")
+
+    port_name_map = gb_db.get_all('GB_COUNTERS_DB', COUNTERS_PORT_NAME_MAP)
+    if not port_name_map:
+        print("No gearbox ports found in GB_COUNTERS_DB, nothing to clear")
+        return
+
+    snapshot = {'time': datetime.now().isoformat(), 'ports': {}}
+    for port_name, oid in port_name_map.items():
+        counters = gb_db.get_all('GB_COUNTERS_DB', COUNTER_TABLE_PREFIX + oid) or {}
+        snapshot['ports'][port_name] = {
+            counter: counters[counter] for counter in FEC_SNAPSHOT_COUNTERS if counter in counters
+        }
+
+    path = get_fec_snapshot_path()
+    try:
+        with open(path, 'w') as f:
+            json.dump(snapshot, f)
+    except IOError as e:
+        print(f"Error: failed to save gearbox counter snapshot {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        redis_client = gb_db.get_redis_client('GB_COUNTERS_DB')
+        for oid in port_name_map.values():
+            for field in FEC_RATE_RESET_FIELDS:
+                redis_client.hdel(RATES_TABLE_PREFIX + oid, field)
+    except Exception as e:
+        print(f"Warning: failed to reset gearbox FEC rate fields: {e}", file=sys.stderr)
+
+    print("Cleared gearbox counters")
+
+
 class InterfaceFecStats(object):
 
     def __init__(self, port_name=None, display_type='stats'):
@@ -352,7 +464,7 @@ class InterfaceFecStats(object):
         else:
             return port_name, ''
 
-    def display_histogram_for_port(self, counters, port_name):
+    def display_histogram_for_port(self, counters, port_name, old_counters=None):
         """
         Display FEC codeword error histogram for a port
         """
@@ -364,6 +476,8 @@ class InterfaceFecStats(object):
         histogram_data = []
         for i, bin_name in enumerate(FEC_HISTOGRAM_BINS):
             value = counters.get(bin_name, '0')
+            if old_counters is not None:
+                value = counter_diff(value, old_counters.get(bin_name))
 
             timestamp_ms = counters.get(f'{bin_name}_TIMESTAMP')
             try:
@@ -389,6 +503,10 @@ class InterfaceFecStats(object):
             ports_to_display = self.get_matching_ports()
             if ports_to_display is None:
                 return
+
+            snapshot = load_fec_snapshot()
+            if snapshot:
+                print(f"Last cached time was {snapshot.get('time')}")
             
             # Display histogram for each port
             for port_name in natsorted(ports_to_display.keys()):
@@ -396,7 +514,8 @@ class InterfaceFecStats(object):
                 counters = self.get_counters_for_oid(oid)
                 
                 if counters:
-                    self.display_histogram_for_port(counters, port_name)
+                    old_counters = snapshot['ports'].get(port_name, {}) if snapshot else None
+                    self.display_histogram_for_port(counters, port_name, old_counters)
                 else:
                     print(f"\n{port_name}")
                     print("No counter data available")
@@ -412,6 +531,10 @@ class InterfaceFecStats(object):
             ports_to_display = self.get_matching_ports()
             if ports_to_display is None:
                 return
+
+            snapshot = load_fec_snapshot()
+            if snapshot:
+                print(f"Last cached time was {snapshot.get('time')}")
             
             # Collect stats for each port
             table_data = []
@@ -419,22 +542,34 @@ class InterfaceFecStats(object):
                 oid = ports_to_display[port_name]
                 counters = self.get_counters_for_oid(oid)
                 rates = self.get_rates_for_oid(oid)
+                old_counters = snapshot['ports'].get(port_name, {}) if snapshot else None
                 
                 base_name, side = self.extract_port_info(port_name)
 
                 iface = f"{base_name} {side}"
                 state = self.get_port_state(base_name, side)
 
+                fec_corr = counters.get(FEC_CORR_COUNTER, '0')
+                fec_uncorr = counters.get(FEC_UNCORR_COUNTER, '0')
+                fec_symbol_err = counters.get(FEC_SYMBOL_ERR_COUNTER, '0')
+                if old_counters is not None:
+                    fec_corr = counter_diff(fec_corr, old_counters.get(FEC_CORR_COUNTER))
+                    fec_uncorr = counter_diff(fec_uncorr, old_counters.get(FEC_UNCORR_COUNTER))
+                    fec_symbol_err = counter_diff(fec_symbol_err, old_counters.get(FEC_SYMBOL_ERR_COUNTER))
+
                 # Get counter values and format with commas
-                fec_corr = format_number_with_commas(counters.get('SAI_PORT_STAT_IF_IN_FEC_CORRECTABLE_FRAMES', '0'))
-                fec_uncorr = format_number_with_commas(counters.get('SAI_PORT_STAT_IF_IN_FEC_NOT_CORRECTABLE_FRAMES', '0'))
-                fec_symbol_err = format_number_with_commas(counters.get('SAI_PORT_STAT_IF_IN_FEC_SYMBOL_ERRORS', '0'))
+                fec_corr = format_number_with_commas(fec_corr)
+                fec_uncorr = format_number_with_commas(fec_uncorr)
+                fec_symbol_err = format_number_with_commas(fec_symbol_err)
 
                 # Format BER values with 2 decimal places
                 fec_pre_ber = format_ber(rates.get('FEC_PRE_BER', '0'))
                 fec_post_ber = format_ber(rates.get('FEC_POST_BER', '0'))
                 fec_pre_ber_max = format_ber(rates.get('FEC_PRE_BER_MAX', 'N/A'))
                 fec_max_t = rates.get('FEC_MAX_T', '-1')
+                if old_counters is not None:
+                    # Report the highest bin hit since the clear, not the lifetime value
+                    fec_max_t = get_fec_max_t_since_snapshot(counters, old_counters, fec_max_t)
 
                 table_data.append([
                     iface,
@@ -469,12 +604,14 @@ def main(args):
         gearboxutil interfaces status
         gearboxutil interfaces fec-histogram [<port_name>]
         gearboxutil interfaces fec-stats [<port_name>]
+        gearboxutil interfaces clear
     
     Examples:
         gearboxutil interfaces fec-histogram                # Show histogram for all ports
         gearboxutil interfaces fec-histogram Ethernet0      # Show histogram for Ethernet0 (line and system)
         gearboxutil interfaces fec-stats                    # Show FEC stats for all ports
         gearboxutil interfaces fec-stats Ethernet0          # Show FEC stats for Ethernet0 (line and system)
+        gearboxutil interfaces clear                        # Clear FEC counters for all ports
     """
 
     if len(args) == 0:
@@ -494,7 +631,7 @@ def main(args):
         return
 
     cmd2 = args[1]
-    if cmd2 not in ["status", "fec-histogram", "fec-stats"]:
+    if cmd2 not in ["status", "fec-histogram", "fec-stats", "clear"]:
         print("No valid command provided")
         print(main.__doc__)
         return
@@ -511,6 +648,8 @@ def main(args):
         # Optional port name parameter
         port_name = args[2] if len(args) > 2 else None
         InterfaceFecStats(port_name, display_type='stats')
+    elif cmd1 == "interfaces" and cmd2 == "clear":
+        clear_fec_counters()
 
     sys.exit(0)
 

@@ -94,6 +94,7 @@
   * [Flow Counters config commands](#flow-counters-config-commands)
 * [Gearbox](#gearbox)
   * [Gearbox show commands](#gearbox-show-commands)
+  * [Gearbox clear commands](#gearbox-clear-commands)
 * [Hash](#hash)
   * [Hash show commands](#hash-show-commands)
   * [Hash config commands](#hash-config-commands)
@@ -6059,6 +6060,25 @@ This command displays the FEC codeword error histogram for gearbox interfaces. H
   BIN15                                 0
 
   ```
+
+### Gearbox clear commands
+
+**sonic-clear gearbox counters**
+
+This command clears the gearbox interface FEC counters shown by `show gearbox interfaces fec-stats` and `show gearbox interfaces fec-histogram`.
+
+- Usage:
+  ```
+  sonic-clear gearbox counters
+  ```
+
+- Example:
+  ```
+  admin@sonic:~$ sonic-clear gearbox counters
+  Cleared gearbox counters
+  ```
+
+- NOTE: After the clear, FEC_CORR, FEC_UNCORR, FEC_SYMBOL_ERR, FEC_MAX_T and the histogram BINs are shown relative to the time of the clear. FEC_PRE_BER_MAX is reset for all users.
 
 Go Back To [Beginning of the document](#) or [Beginning of this section](#gearbox)
 
